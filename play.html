@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Putar — ZerozxStream</title>
+<title>Putar — Wayss</title>
 <link rel="stylesheet" href="/css/style.css">
 <style>
   /* Tambahan lokal supaya <video> & overlay bekerja tanpa ubah style.css */
@@ -18,19 +18,16 @@
   }
   .player-overlay h3{color:#fff;font-family:var(--display,sans-serif);margin-bottom:6px}
   .player-overlay code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px;font-size:12px}
-  .server-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-  .server-btn{
-    padding:8px 14px;border-radius:10px;font-size:12px;font-weight:700;
-    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
-    color:#fff;cursor:pointer;transition:.2s;
+  .player-error{
+    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+    background:rgba(229,9,20,.92);color:#fff;padding:8px 14px;border-radius:10px;
+    font-size:12px;font-weight:600;z-index:4;max-width:90%;
   }
-  .server-btn:hover{background:rgba(255,255,255,.1)}
-  .server-btn.active{background:rgba(229,9,20,.2);border-color:rgba(229,9,20,.55)}
 </style>
 </head>
 <body>
 <nav class="nav scrolled">
-  <a class="logo" href="/home"><span class="z">Z</span><span class="rest">erozx</span><span class="dot">Stream</span></a>
+  <a class="logo" href="/home"><span class="z">W</span><span class="rest">ayss</span></a>
   <div class="nav-links"><a href="/home">← Kembali ke beranda</a></div>
 </nav>
 
@@ -40,7 +37,7 @@
 
 <script>
 /* ================================================================
-   PLAYER_TEMPLATE — sumber video untuk pemutar.
+   PLAYER_TEMPLATE — sumber video untuk pemutar Wayss.
    Pilih salah satu cara pakai:
 
    1) Pola URL pemutar berlisensi milikmu (pakai {type} & {id}):
@@ -54,10 +51,10 @@
 
    Catatan: {type} akan jadi "movie" atau "tv", {id} = slug dari API.
    ================================================================ */
-const PLAYER_TEMPLATE = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
+const PLAYER_TEMPLATE = "";
 
 const [, , t, slug] = location.pathname.split("/");
-const type = t === "tv" ? "tv" : "film";
+const type    = t === "tv" ? "tv" : "film";
 const tmdbType = type === "tv" ? "tv" : "movie";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
@@ -107,23 +104,43 @@ function mountPlayer(container, src, poster, resumeKey) {
         <div class="spinner"></div>
         <div>Memuat video…</div>
       </div>
-      <video id="pl-video" controls playsinline preload="metadata"
+      <video id="pl-video" controls playsinline preload="auto"
         ${poster ? `poster="${esc(poster)}"` : ""}></video>`;
 
-    const v = container.querySelector("#pl-video");
+    const v  = container.querySelector("#pl-video");
     const ov = container.querySelector("#pl-overlay");
 
-    // resume posisi
-    const posKey = `zerozx_pos_${resumeKey}`;
-    const saved = get(posKey, null);
-    const resumeAt = (saved && Date.now() - saved.ts < 1000 * 60 * 60 * 24 * 30) ? saved.t : 0;
+    const posKey   = `wayss_pos_${resumeKey}`;
+    const saved    = get(posKey, null);
+    const isRecent = saved && Date.now() - saved.ts < 1000 * 60 * 60 * 24 * 30;
+    let   resumeAt = isRecent ? saved.t : 0;
+    let   applied  = false;   // biar seek cuma sekali
 
-    v.addEventListener("loadedmetadata", () => {
-      ov?.remove();
-      if (resumeAt > 5 && v.duration && resumeAt < v.duration - 10) {
+    // Durasi baru dianggap valid kalau angka & > 0 & bukan live (Infinity)
+    const validDuration = d => Number.isFinite(d) && d > 0 && d !== Infinity;
+
+    // Terapkan resume HANYA saat durasi sudah final
+    const tryApplyResume = () => {
+      if (applied) return;
+      if (!validDuration(v.duration)) return;
+      if (resumeAt > 5 && resumeAt < v.duration - 10) {
         try { v.currentTime = resumeAt; } catch {}
       }
-      v.play().catch(() => {}); // autoplay bisa diblokir browser
+      applied = true;
+    };
+
+    // HLS sering update durasi beberapa kali → pakai durationchange
+    v.addEventListener("durationchange", () => {
+      if (validDuration(v.duration)) ov?.remove();
+      tryApplyResume();
+    });
+    v.addEventListener("loadedmetadata", () => {
+      if (validDuration(v.duration)) ov?.remove();
+      tryApplyResume();
+    });
+    v.addEventListener("canplay", () => {
+      if (validDuration(v.duration)) ov?.remove();
+      v.play().catch(() => {});
     }, { once: true });
 
     v.addEventListener("error", () => {
@@ -135,25 +152,34 @@ function mountPlayer(container, src, poster, resumeKey) {
         </div>`);
     }, { once: true });
 
-    // simpan posisi tiap 5 detik
+    // Simpan posisi tiap 5 detik — hanya kalau durasi valid & bukan live
     v.addEventListener("timeupdate", () => {
-      if (v.paused || !v.duration) return;
+      if (v.paused || !validDuration(v.duration)) return;
       if (Math.floor(v.currentTime) % 5 !== 0) return;
-      set(posKey, { t: v.currentTime, ts: Date.now() });
+      set(posKey, { t: v.currentTime, dur: v.duration, ts: Date.now() });
     });
     v.addEventListener("ended", () => { try { localStorage.removeItem(posKey); } catch {} });
 
     // HLS pakai hls.js bila browser tidak dukung native
     if (/\.m3u8(\?|#|$)/i.test(src) && !v.canPlayType("application/vnd.apple.mpegurl")) {
       loadHls().then(Hls => {
-        if (Hls.isSupported()) {
-          const h = new Hls({ maxBufferLength: 30 });
-          h.loadSource(src);
-          h.attachMedia(v);
-          h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) v.dispatchEvent(new Event("error")); });
-        } else {
-          v.src = src;
-        }
+        if (!Hls.isSupported()) { v.src = src; return; }
+        const h = new Hls({ maxBufferLength: 30 });
+        h.loadSource(src);
+        h.attachMedia(v);
+
+        // Deteksi live vs VOD + durasi final dari manifest
+        h.on(Hls.Events.LEVEL_LOADED, (_, data) => {
+          const d = data?.details;
+          if (d?.live) {
+            console.warn("[Wayss] Stream HLS ini LIVE — durasi tidak akan final.");
+          } else if (d?.totalduration && validDuration(d.totalduration)) {
+            console.info(`[Wayss] HLS durasi final: ${d.totalduration.toFixed(1)} detik`);
+          }
+        });
+        h.on(Hls.Events.ERROR, (_, d) => {
+          if (d.fatal) v.dispatchEvent(new Event("error"));
+        });
       }).catch(() => { v.src = src; });
     } else {
       v.src = src;
@@ -185,12 +211,12 @@ function mountPlayer(container, src, poster, resumeKey) {
     const r = await fetch(`/api/movies?action=detail&slug=${encodeURIComponent(slug)}&type=${tmdbType}`);
     const m = (await r.json()).results;
     if (!m || !m.title) throw new Error();
-    document.title = `${m.title} — ZerozxStream`;
+    document.title = `${m.title} — Wayss`;
 
-    // simpan riwayat
-    const hist = get("zerozx_history", []).filter(x => x.slug !== m.slug);
+    // simpan riwayat (dibaca oleh tab Riwayat di app.js)
+    const hist = get("wayss_history", []).filter(x => x.slug !== m.slug);
     hist.unshift({ ...m, watchedAt: Date.now() });
-    set("zerozx_history", hist.slice(0, 100));
+    set("wayss_history", hist.slice(0, 100));
 
     // tentukan sumber video
     let src = "";
@@ -202,7 +228,7 @@ function mountPlayer(container, src, poster, resumeKey) {
       src = `https://www.youtube.com/embed/${m.trailer}?rel=0`;
     }
 
-    const isFav = get("zerozx_favorites", []).some(x => x.slug === m.slug);
+    const isFav = get("wayss_favorites", []).some(x => x.slug === m.slug);
 
     root.innerHTML = `
       <div class="player" id="playerBox" style="background-image:url('${esc(m.backdrop)}')"></div>
@@ -231,10 +257,10 @@ function mountPlayer(container, src, poster, resumeKey) {
 
     // tombol favorit
     document.getElementById("fav").onclick = e => {
-      let f = get("zerozx_favorites", []);
+      let f = get("wayss_favorites", []);
       const has = f.some(x => x.slug === m.slug);
       f = has ? f.filter(x => x.slug !== m.slug) : [{ ...m, savedAt: Date.now() }, ...f];
-      set("zerozx_favorites", f);
+      set("wayss_favorites", f);
       e.target.textContent = has ? "♡ Favoritkan" : "❤ Tersimpan";
     };
   } catch {
