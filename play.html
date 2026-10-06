@@ -3,8 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Putar — Wayss</title>
+<title>Putar — ZerozxStream</title>
 <link rel="stylesheet" href="/css/style.css">
+<style>
+  /* Tambahan lokal supaya <video> & overlay bekerja tanpa ubah style.css */
+  .player{position:relative;overflow:hidden}
+  .player video{width:100%;height:100%;display:block;background:#000}
+  .player iframe{width:100%;height:100%;border:0;display:block;background:#000}
+  .player-overlay{
+    position:absolute;inset:0;z-index:3;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;color:#c9c9d2;
+    background:rgba(0,0,0,.85);
+  }
+  .player-overlay h3{color:#fff;font-family:var(--display,sans-serif);margin-bottom:6px}
+  .player-overlay code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px;font-size:12px}
+  .server-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .server-btn{
+    padding:8px 14px;border-radius:10px;font-size:12px;font-weight:700;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+    color:#fff;cursor:pointer;transition:.2s;
+  }
+  .server-btn:hover{background:rgba(255,255,255,.1)}
+  .server-btn.active{background:rgba(229,9,20,.2);border-color:rgba(229,9,20,.55)}
+</style>
 </head>
 <body>
 <nav class="nav scrolled">
@@ -17,53 +39,197 @@
 </main>
 
 <script>
-/* Sumber pemutar legal/berlisensi milikmu. Template: {type} = movie|tv, {id} = ID TMDB.
-   Contoh: "https://player.domainmu.com/{type}/{id}". Kosong = tampilkan trailer resmi. */
-const PLAYER_TEMPLATE = "";
+/* ================================================================
+   PLAYER_TEMPLATE — sumber video untuk pemutar.
+   Pilih salah satu cara pakai:
+
+   1) Pola URL pemutar berlisensi milikmu (pakai {type} & {id}):
+      "https://player.domainmu.com/embed/{type}/{id}"
+      "https://cdn.domainmu.com/vod/{type}/{id}/master.m3u8"
+
+   2) URL langsung (mp4 / webm / m3u8 / YouTube / Vimeo) untuk semua judul:
+      "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+
+   3) Kosongkan ("") → fallback otomatis ke trailer resmi TMDB.
+
+   Catatan: {type} akan jadi "movie" atau "tv", {id} = slug dari API.
+   ================================================================ */
+const PLAYER_TEMPLATE = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
 const [, , t, slug] = location.pathname.split("/");
 const type = t === "tv" ? "tv" : "film";
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const tmdbType = type === "tv" ? "tv" : "movie";
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const get = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const set = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+/* ---------- helper: deteksi jenis sumber ---------- */
+const isVideoFile = u => /\.(mp4|webm|ogv|m3u8|mkv)(\?|#|$)/i.test(u || "");
+const toEmbed = u => {
+  if (!u) return "";
+  const yt = u.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}?rel=0&modestbranding=1&playsinline=1`;
+  const vm = u.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if (vm) return `https://player.vimeo.com/video/${vm[1]}?title=0&byline=0`;
+  return u; // sudah embed URL / iframe player kustom
+};
+
+/* ---------- lazy load hls.js ---------- */
+let _hls;
+const loadHls = () => _hls || (_hls = new Promise((res, rej) => {
+  if (window.Hls) return res(window.Hls);
+  const s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
+  s.onload = () => window.Hls ? res(window.Hls) : rej(new Error("Hls kosong"));
+  s.onerror = rej;
+  document.head.appendChild(s);
+}));
+
+/* ================================================================
+   MOUNT PLAYER — render <video> atau <iframe> sesuai jenis sumber
+   ================================================================ */
+function mountPlayer(container, src, poster, resumeKey) {
+  if (!src) {
+    container.innerHTML = `
+      <div class="player-empty"><div>
+        <h3 style="color:var(--text);font-family:var(--display)">Pemutar belum diatur</h3>
+        <p>Isi <code>PLAYER_TEMPLATE</code> di play.html untuk menayangkan film penuh.</p>
+      </div></div>`;
+    return;
+  }
+
+  /* ---------- VIDEO FILE (mp4 / webm / m3u8) ---------- */
+  if (isVideoFile(src)) {
+    container.innerHTML = `
+      <div class="player-overlay" id="pl-overlay">
+        <div class="spinner"></div>
+        <div>Memuat video…</div>
+      </div>
+      <video id="pl-video" controls playsinline preload="metadata"
+        ${poster ? `poster="${esc(poster)}"` : ""}></video>`;
+
+    const v = container.querySelector("#pl-video");
+    const ov = container.querySelector("#pl-overlay");
+
+    // resume posisi
+    const posKey = `zerozx_pos_${resumeKey}`;
+    const saved = get(posKey, null);
+    const resumeAt = (saved && Date.now() - saved.ts < 1000 * 60 * 60 * 24 * 30) ? saved.t : 0;
+
+    v.addEventListener("loadedmetadata", () => {
+      ov?.remove();
+      if (resumeAt > 5 && v.duration && resumeAt < v.duration - 10) {
+        try { v.currentTime = resumeAt; } catch {}
+      }
+      v.play().catch(() => {}); // autoplay bisa diblokir browser
+    }, { once: true });
+
+    v.addEventListener("error", () => {
+      ov?.remove();
+      container.insertAdjacentHTML("beforeend", `
+        <div class="player-overlay">
+          <h3>Gagal memuat video</h3>
+          <p>Sumber tidak dapat dijangkau. Coba lagi atau isi PLAYER_TEMPLATE dengan URL lain.</p>
+        </div>`);
+    }, { once: true });
+
+    // simpan posisi tiap 5 detik
+    v.addEventListener("timeupdate", () => {
+      if (v.paused || !v.duration) return;
+      if (Math.floor(v.currentTime) % 5 !== 0) return;
+      set(posKey, { t: v.currentTime, ts: Date.now() });
+    });
+    v.addEventListener("ended", () => { try { localStorage.removeItem(posKey); } catch {} });
+
+    // HLS pakai hls.js bila browser tidak dukung native
+    if (/\.m3u8(\?|#|$)/i.test(src) && !v.canPlayType("application/vnd.apple.mpegurl")) {
+      loadHls().then(Hls => {
+        if (Hls.isSupported()) {
+          const h = new Hls({ maxBufferLength: 30 });
+          h.loadSource(src);
+          h.attachMedia(v);
+          h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) v.dispatchEvent(new Event("error")); });
+        } else {
+          v.src = src;
+        }
+      }).catch(() => { v.src = src; });
+    } else {
+      v.src = src;
+    }
+    return;
+  }
+
+  /* ---------- IFRAME (YouTube / Vimeo / player kustom) ---------- */
+  container.innerHTML = `
+    <div class="player-overlay" id="pl-overlay">
+      <div class="spinner"></div>
+      <div>Memuat pemutar…</div>
+    </div>
+    <iframe id="pl-frame"
+      src="${esc(toEmbed(src))}"
+      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+      allowfullscreen></iframe>`;
+
+  container.querySelector("#pl-frame")
+    .addEventListener("load", () => container.querySelector("#pl-overlay")?.remove(), { once: true });
+}
+
+/* ================================================================
+   BOOTSTRAP
+   ================================================================ */
 (async () => {
   const root = document.getElementById("root");
   try {
-    const r = await fetch(`/api/movies?action=detail&slug=${encodeURIComponent(slug)}&type=${type === "tv" ? "tv" : "movie"}`);
+    const r = await fetch(`/api/movies?action=detail&slug=${encodeURIComponent(slug)}&type=${tmdbType}`);
     const m = (await r.json()).results;
     if (!m || !m.title) throw new Error();
     document.title = `${m.title} — ZerozxStream`;
 
-    // simpan ke riwayat (dibaca oleh tab Riwayat di app.js)
+    // simpan riwayat
     const hist = get("zerozx_history", []).filter(x => x.slug !== m.slug);
     hist.unshift({ ...m, watchedAt: Date.now() });
     set("zerozx_history", hist.slice(0, 100));
 
+    // tentukan sumber video
     let src = "";
-    if (PLAYER_TEMPLATE) src = PLAYER_TEMPLATE.replace("{type}", type === "tv" ? "tv" : "movie").replace("{id}", m.slug);
-    else if (m.trailer) src = `https://www.youtube.com/embed/${m.trailer}?rel=0`;
+    if (PLAYER_TEMPLATE) {
+      src = PLAYER_TEMPLATE
+        .replace(/\{type\}/g, tmdbType)
+        .replace(/\{id\}/g, m.slug);
+    } else if (m.trailer) {
+      src = `https://www.youtube.com/embed/${m.trailer}?rel=0`;
+    }
 
     const isFav = get("zerozx_favorites", []).some(x => x.slug === m.slug);
+
     root.innerHTML = `
-      <div class="player" style="background-image:url('${esc(m.backdrop)}')">
-        ${src ? `<iframe src="${esc(src)}" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture"></iframe>`
-              : `<div class="player-empty"><div><h3 style="color:var(--text);font-family:var(--display)">Pemutar belum diatur</h3><p>Isi PLAYER_TEMPLATE di play.html untuk menayangkan film penuh.</p></div></div>`}
-      </div>
+      <div class="player" id="playerBox" style="background-image:url('${esc(m.backdrop)}')"></div>
       <div class="info">
         <img src="${esc(m.poster)}" alt="${esc(m.title)}">
         <div>
           <h1>${esc(m.title)}</h1>
           <div class="modal-meta">
             ${m.rating ? `<span class="score">★ ${Number(m.rating).toFixed(1)}</span>` : ""}
-            <span class="pill">HD</span><span class="pill">${esc(m.year)}</span>
+            <span class="pill">HD</span>
+            <span class="pill">${esc(m.year)}</span>
           </div>
-          <div class="modal-genres">${m.genres.map(g => `<span>${esc(g)}</span>`).join("")}</div>
+          <div class="modal-genres">
+            ${(m.genres || []).map(g => `<span>${esc(g)}</span>`).join("")}
+          </div>
           <p class="modal-desc">${esc(m.overview || "Deskripsi belum tersedia.")}</p>
-          <div class="modal-actions"><button class="btn btn-ghost" id="fav">${isFav ? "❤ Tersimpan" : "♡ Favoritkan"}</button></div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" id="fav">${isFav ? "❤ Tersimpan" : "♡ Favoritkan"}</button>
+          </div>
         </div>
       </div>`;
 
+    // pasang pemutar
+    const box = document.getElementById("playerBox");
+    mountPlayer(box, src, m.backdrop || m.poster, `${tmdbType}_${m.slug}`);
+
+    // tombol favorit
     document.getElementById("fav").onclick = e => {
       let f = get("zerozx_favorites", []);
       const has = f.some(x => x.slug === m.slug);
