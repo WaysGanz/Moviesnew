@@ -30,7 +30,7 @@
      "https://cdn.domainmu.com/vod/{type}/{id}/master.m3u8"
    {type} = movie | tv     {id} = ID TMDB
    ============================================================ */
-const PLAYER_TEMPLATE = "";
+const PLAYER_TEMPLATE = "https://movies-filmm.vercel.app/embed/{type}/{id}";
 
 const [, , t, slug] = location.pathname.split("/");
 const tmdbType = t === "tv" ? "tv" : "movie";
