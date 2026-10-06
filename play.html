@@ -2,32 +2,19 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Putar — Wayss</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Putar — WaysStreamm</title>
 <link rel="stylesheet" href="/css/style.css">
 <style>
-  /* Tambahan lokal supaya <video> & overlay bekerja tanpa ubah style.css */
-  .player{position:relative;overflow:hidden}
-  .player video{width:100%;height:100%;display:block;background:#000}
-  .player iframe{width:100%;height:100%;border:0;display:block;background:#000}
-  .player-overlay{
-    position:absolute;inset:0;z-index:3;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:14px;padding:24px;text-align:center;color:#c9c9d2;
-    background:rgba(0,0,0,.85);
-  }
-  .player-overlay h3{color:#fff;font-family:var(--display,sans-serif);margin-bottom:6px}
-  .player-overlay code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px;font-size:12px}
-  .player-error{
-    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
-    background:rgba(229,9,20,.92);color:#fff;padding:8px 14px;border-radius:10px;
-    font-size:12px;font-weight:600;z-index:4;max-width:90%;
-  }
+  .player video{position:absolute;inset:0;width:100%;height:100%;background:#000}
+  .player-overlay{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;color:var(--muted);background:rgba(12,11,16,.85)}
+  .player-overlay h3{color:var(--text);font-family:var(--display);margin-bottom:6px}
+  .player-overlay code{background:rgba(243,236,224,.08);padding:2px 6px;border-radius:6px;font-size:12px}
 </style>
 </head>
 <body>
 <nav class="nav scrolled">
-  <a class="logo" href="/home"><span class="z">W</span><span class="rest">ayss</span></a>
+  <a class="logo" href="/home"><span class="z">W</span><span class="rest">ayss</span><span class="dot">treamm</span></a>
   <div class="nav-links"><a href="/home">← Kembali ke beranda</a></div>
 </nav>
 
@@ -36,150 +23,88 @@
 </main>
 
 <script>
-/* ================================================================
-   PLAYER_TEMPLATE — sumber video untuk pemutar Wayss.
-   Pilih salah satu cara pakai:
-
-   1) Pola URL pemutar berlisensi milikmu (pakai {type} & {id}):
-      "https://player.domainmu.com/embed/{type}/{id}"
-      "https://cdn.domainmu.com/vod/{type}/{id}/master.m3u8"
-
-   2) URL langsung (mp4 / webm / m3u8 / YouTube / Vimeo) untuk semua judul:
-      "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-
-   3) Kosongkan ("") → fallback otomatis ke trailer resmi TMDB.
-
-   Catatan: {type} akan jadi "movie" atau "tv", {id} = slug dari API.
-   ================================================================ */
+/* ============================================================
+   PLAYER_TEMPLATE — sumber video (biarkan "" untuk pakai trailer TMDB).
+   Contoh isi kalau punya player sendiri:
+     "https://player.domainmu.com/embed/{type}/{id}"
+     "https://cdn.domainmu.com/vod/{type}/{id}/master.m3u8"
+   {type} = movie | tv     {id} = ID TMDB
+   ============================================================ */
 const PLAYER_TEMPLATE = "";
 
 const [, , t, slug] = location.pathname.split("/");
-const type    = t === "tv" ? "tv" : "film";
-const tmdbType = type === "tv" ? "tv" : "movie";
+const tmdbType = t === "tv" ? "tv" : "movie";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
-  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const get = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const set = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-/* ---------- helper: deteksi jenis sumber ---------- */
 const isVideoFile = u => /\.(mp4|webm|ogv|m3u8|mkv)(\?|#|$)/i.test(u || "");
 const toEmbed = u => {
   if (!u) return "";
   const yt = u.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
-  if (yt) return `https://www.youtube.com/embed/${yt[1]}?rel=0&modestbranding=1&playsinline=1`;
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}?rel=0&modestbranding=1`;
   const vm = u.match(/vimeo\.com\/(?:video\/)?(\d+)/);
   if (vm) return `https://player.vimeo.com/video/${vm[1]}?title=0&byline=0`;
-  return u; // sudah embed URL / iframe player kustom
+  return u;
 };
 
-/* ---------- lazy load hls.js ---------- */
 let _hls;
 const loadHls = () => _hls || (_hls = new Promise((res, rej) => {
   if (window.Hls) return res(window.Hls);
   const s = document.createElement("script");
   s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
-  s.onload = () => window.Hls ? res(window.Hls) : rej(new Error("Hls kosong"));
+  s.onload = () => window.Hls ? res(window.Hls) : rej();
   s.onerror = rej;
   document.head.appendChild(s);
 }));
 
-/* ================================================================
-   MOUNT PLAYER — render <video> atau <iframe> sesuai jenis sumber
-   ================================================================ */
-function mountPlayer(container, src, poster, resumeKey) {
+function mountPlayer(box, src, poster, key) {
   if (!src) {
-    container.innerHTML = `
-      <div class="player-empty"><div>
-        <h3 style="color:var(--text);font-family:var(--display)">Pemutar belum diatur</h3>
-        <p>Isi <code>PLAYER_TEMPLATE</code> di play.html untuk menayangkan film penuh.</p>
-      </div></div>`;
+    box.innerHTML = `<div class="player-empty"><div>
+      <h3 style="color:var(--text)">Pemutar belum diatur</h3>
+      <p>Isi <code>PLAYER_TEMPLATE</code> di play.html untuk menayangkan film penuh.</p>
+    </div></div>`;
     return;
   }
 
-  /* ---------- VIDEO FILE (mp4 / webm / m3u8) ---------- */
   if (isVideoFile(src)) {
-    container.innerHTML = `
-      <div class="player-overlay" id="pl-overlay">
-        <div class="spinner"></div>
-        <div>Memuat video…</div>
-      </div>
-      <video id="pl-video" controls playsinline preload="auto"
-        ${poster ? `poster="${esc(poster)}"` : ""}></video>`;
+    box.innerHTML = `
+      <div class="player-overlay" id="pl-ov"><div><div class="spinner"></div><div style="margin-top:10px">Memuat video…</div></div></div>
+      <video id="pl-v" controls playsinline preload="auto" ${poster ? `poster="${esc(poster)}"` : ""}></video>`;
+    const v = box.querySelector("#pl-v");
+    const ov = box.querySelector("#pl-ov");
 
-    const v  = container.querySelector("#pl-video");
-    const ov = container.querySelector("#pl-overlay");
+    const posKey = `wayss_pos_${key}`;
+    const saved = get(posKey, null);
+    const recent = saved && Date.now() - saved.ts < 1e3 * 3600 * 24 * 30;
+    let resumeAt = recent ? saved.t : 0, applied = false;
+    const valid = d => Number.isFinite(d) && d > 0 && d !== Infinity;
 
-    const posKey   = `wayss_pos_${resumeKey}`;
-    const saved    = get(posKey, null);
-    const isRecent = saved && Date.now() - saved.ts < 1000 * 60 * 60 * 24 * 30;
-    let   resumeAt = isRecent ? saved.t : 0;
-    let   applied  = false;   // biar seek cuma sekali
-
-    // Durasi baru dianggap valid kalau angka & > 0 & bukan live (Infinity)
-    const validDuration = d => Number.isFinite(d) && d > 0 && d !== Infinity;
-
-    // Terapkan resume HANYA saat durasi sudah final
-    const tryApplyResume = () => {
-      if (applied) return;
-      if (!validDuration(v.duration)) return;
-      if (resumeAt > 5 && resumeAt < v.duration - 10) {
-        try { v.currentTime = resumeAt; } catch {}
-      }
+    const tryResume = () => {
+      if (applied || !valid(v.duration)) return;
+      if (resumeAt > 5 && resumeAt < v.duration - 10) try { v.currentTime = resumeAt; } catch {}
       applied = true;
     };
-
-    // HLS sering update durasi beberapa kali → pakai durationchange
-    v.addEventListener("durationchange", () => {
-      if (validDuration(v.duration)) ov?.remove();
-      tryApplyResume();
-    });
-    v.addEventListener("loadedmetadata", () => {
-      if (validDuration(v.duration)) ov?.remove();
-      tryApplyResume();
-    });
-    v.addEventListener("canplay", () => {
-      if (validDuration(v.duration)) ov?.remove();
-      v.play().catch(() => {});
-    }, { once: true });
-
-    v.addEventListener("error", () => {
-      ov?.remove();
-      container.insertAdjacentHTML("beforeend", `
-        <div class="player-overlay">
-          <h3>Gagal memuat video</h3>
-          <p>Sumber tidak dapat dijangkau. Coba lagi atau isi PLAYER_TEMPLATE dengan URL lain.</p>
-        </div>`);
-    }, { once: true });
-
-    // Simpan posisi tiap 5 detik — hanya kalau durasi valid & bukan live
+    v.addEventListener("durationchange", () => { if (valid(v.duration)) ov?.remove(); tryResume(); });
+    v.addEventListener("loadedmetadata", () => { if (valid(v.duration)) ov?.remove(); tryResume(); });
+    v.addEventListener("canplay", () => { ov?.remove(); v.play().catch(() => {}); }, { once: true });
+    v.addEventListener("error", () => { ov?.remove(); box.insertAdjacentHTML("beforeend",
+      `<div class="player-overlay"><h3>Gagal memuat video</h3><p>Sumber tidak dapat dijangkau.</p></div>`); }, { once: true });
     v.addEventListener("timeupdate", () => {
-      if (v.paused || !validDuration(v.duration)) return;
+      if (v.paused || !valid(v.duration)) return;
       if (Math.floor(v.currentTime) % 5 !== 0) return;
-      set(posKey, { t: v.currentTime, dur: v.duration, ts: Date.now() });
+      set(posKey, { t: v.currentTime, ts: Date.now() });
     });
     v.addEventListener("ended", () => { try { localStorage.removeItem(posKey); } catch {} });
 
-    // HLS pakai hls.js bila browser tidak dukung native
     if (/\.m3u8(\?|#|$)/i.test(src) && !v.canPlayType("application/vnd.apple.mpegurl")) {
       loadHls().then(Hls => {
         if (!Hls.isSupported()) { v.src = src; return; }
         const h = new Hls({ maxBufferLength: 30 });
-        h.loadSource(src);
-        h.attachMedia(v);
-
-        // Deteksi live vs VOD + durasi final dari manifest
-        h.on(Hls.Events.LEVEL_LOADED, (_, data) => {
-          const d = data?.details;
-          if (d?.live) {
-            console.warn("[Wayss] Stream HLS ini LIVE — durasi tidak akan final.");
-          } else if (d?.totalduration && validDuration(d.totalduration)) {
-            console.info(`[Wayss] HLS durasi final: ${d.totalduration.toFixed(1)} detik`);
-          }
-        });
-        h.on(Hls.Events.ERROR, (_, d) => {
-          if (d.fatal) v.dispatchEvent(new Event("error"));
-        });
+        h.loadSource(src); h.attachMedia(v);
+        h.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) v.dispatchEvent(new Event("error")); });
       }).catch(() => { v.src = src; });
     } else {
       v.src = src;
@@ -187,63 +112,42 @@ function mountPlayer(container, src, poster, resumeKey) {
     return;
   }
 
-  /* ---------- IFRAME (YouTube / Vimeo / player kustom) ---------- */
-  container.innerHTML = `
-    <div class="player-overlay" id="pl-overlay">
-      <div class="spinner"></div>
-      <div>Memuat pemutar…</div>
-    </div>
-    <iframe id="pl-frame"
-      src="${esc(toEmbed(src))}"
-      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-      allowfullscreen></iframe>`;
-
-  container.querySelector("#pl-frame")
-    .addEventListener("load", () => container.querySelector("#pl-overlay")?.remove(), { once: true });
+  box.innerHTML = `
+    <div class="player-overlay" id="pl-ov"><div><div class="spinner"></div><div style="margin-top:10px">Memuat pemutar…</div></div></div>
+    <iframe src="${esc(toEmbed(src))}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+  box.querySelector("iframe").addEventListener("load", () => box.querySelector("#pl-ov")?.remove(), { once: true });
 }
 
-/* ================================================================
-   BOOTSTRAP
-   ================================================================ */
 (async () => {
   const root = document.getElementById("root");
   try {
     const r = await fetch(`/api/movies?action=detail&slug=${encodeURIComponent(slug)}&type=${tmdbType}`);
     const m = (await r.json()).results;
     if (!m || !m.title) throw new Error();
-    document.title = `${m.title} — Wayss`;
+    document.title = `${m.title} — WaysStreamm`;
 
-    // simpan riwayat (dibaca oleh tab Riwayat di app.js)
-    const hist = get("wayss_history", []).filter(x => x.slug !== m.slug);
+    const hist = get("wayss_history", []).filter(x => !(x.slug === m.slug && x.type === m.type));
     hist.unshift({ ...m, watchedAt: Date.now() });
     set("wayss_history", hist.slice(0, 100));
 
-    // tentukan sumber video
     let src = "";
-    if (PLAYER_TEMPLATE) {
-      src = PLAYER_TEMPLATE
-        .replace(/\{type\}/g, tmdbType)
-        .replace(/\{id\}/g, m.slug);
-    } else if (m.trailer) {
-      src = `https://www.youtube.com/embed/${m.trailer}?rel=0`;
-    }
+    if (PLAYER_TEMPLATE) src = PLAYER_TEMPLATE.replace(/\{type\}/g, tmdbType).replace(/\{id\}/g, m.slug);
+    else if (m.trailer) src = `https://www.youtube.com/embed/${m.trailer}?rel=0`;
 
-    const isFav = get("wayss_favorites", []).some(x => x.slug === m.slug);
+    const isFav = get("wayss_favorites", []).some(x => x.slug === m.slug && x.type === m.type);
 
     root.innerHTML = `
-      <div class="player" id="playerBox" style="background-image:url('${esc(m.backdrop)}')"></div>
+      <div class="player" id="playerBox" ${m.backdrop ? `style="background-image:url('${esc(m.backdrop)}')"` : ""}></div>
       <div class="info">
-        <img src="${esc(m.poster)}" alt="${esc(m.title)}">
+        ${m.poster ? `<img src="${esc(m.poster)}" alt="${esc(m.title)}">` : ""}
         <div>
           <h1>${esc(m.title)}</h1>
           <div class="modal-meta">
             ${m.rating ? `<span class="score">★ ${Number(m.rating).toFixed(1)}</span>` : ""}
             <span class="pill">HD</span>
-            <span class="pill">${esc(m.year)}</span>
+            ${m.year ? `<span class="pill">${esc(m.year)}</span>` : ""}
           </div>
-          <div class="modal-genres">
-            ${(m.genres || []).map(g => `<span>${esc(g)}</span>`).join("")}
-          </div>
+          ${m.genres?.length ? `<div class="modal-genres">${m.genres.map(g => `<span>${esc(g)}</span>`).join("")}</div>` : ""}
           <p class="modal-desc">${esc(m.overview || "Deskripsi belum tersedia.")}</p>
           <div class="modal-actions">
             <button class="btn btn-ghost" id="fav">${isFav ? "❤ Tersimpan" : "♡ Favoritkan"}</button>
@@ -251,20 +155,18 @@ function mountPlayer(container, src, poster, resumeKey) {
         </div>
       </div>`;
 
-    // pasang pemutar
-    const box = document.getElementById("playerBox");
-    mountPlayer(box, src, m.backdrop || m.poster, `${tmdbType}_${m.slug}`);
+    mountPlayer(document.getElementById("playerBox"), src, m.backdrop || m.poster, `${m.type}_${m.slug}`);
 
-    // tombol favorit
     document.getElementById("fav").onclick = e => {
       let f = get("wayss_favorites", []);
-      const has = f.some(x => x.slug === m.slug);
-      f = has ? f.filter(x => x.slug !== m.slug) : [{ ...m, savedAt: Date.now() }, ...f];
+      const has = f.some(x => x.slug === m.slug && x.type === m.type);
+      f = has ? f.filter(x => !(x.slug === m.slug && x.type === m.type))
+              : [{ ...m, savedAt: Date.now() }, ...f];
       set("wayss_favorites", f);
       e.target.textContent = has ? "♡ Favoritkan" : "❤ Tersimpan";
     };
   } catch {
-    root.innerHTML = `<div class="state"><h3>Judul tidak ditemukan</h3><p>Kembali ke beranda dan pilih judul lain.</p></div>`;
+    root.innerHTML = `<div class="player-empty"><div><h3 style="color:var(--text)">Judul tidak ditemukan</h3><p>Kembali ke beranda.</p></div></div>`;
   }
 })();
 </script>
