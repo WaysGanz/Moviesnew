@@ -1,5 +1,6 @@
-/* ZerozxStream — app.js (fixed)
-   Perbaikan: `const history` diganti `watchHistory` supaya tidak menimpa window.history */
+/* WaysStreamm — app.js
+   Struktur tetap seperti versi ZerozxStream, hanya di-rename ke Wayss.
+   `const watchHistory` tetap dipakai supaya tidak menimpa window.history. */
 
 const API = "/api/movies";
 const main = document.getElementById("main");
@@ -10,7 +11,9 @@ const heroEl = document.getElementById("hero");
 
 /* ---------- LocalStorage ---------- */
 const DB = {
-  FAV: "zerozx_favorites", HIST: "zerozx_history", SEARCH_HIST: "zerozx_search_history",
+  FAV: "wayss_favorites",
+  HIST: "wayss_history",
+  SEARCH_HIST: "wayss_search_history",
   get(k, fb){ try{ return JSON.parse(localStorage.getItem(k)) ?? fb; }catch{ return fb; } },
   set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} },
 };
@@ -199,7 +202,7 @@ function setHero(m){
   document.getElementById("heroDesc").textContent = m.overview;
   document.getElementById("heroMeta").innerHTML =
     `${m.rating ? `<span class="score">★ ${Number(m.rating).toFixed(1)}</span>` : ""}
-     <span class="pill">HD</span><span class="pill">${esc(m.year)}</span><span>ZerozxStream</span>`;
+     <span class="pill">HD</span><span class="pill">${esc(m.year)}</span><span>WaysStreamm</span>`;
   document.getElementById("heroPlay").onclick = () => goPlay(m.slug, m.type || "film");
 }
 
@@ -445,21 +448,21 @@ function renderProfile(){
     <span style="flex:1;text-align:left;font-weight:600">${label}</span><span style="color:var(--muted)">›</span></button>`;
 
   main.innerHTML = `
-    <div class="tab-hero"><h1>Halo, <span class="red">Penonton</span></h1><p>Profil ZerozxStream kamu.</p></div>
+    <div class="tab-hero"><h1>Halo, <span class="red">Penonton</span></h1><p>Profil WaysStreamm kamu.</p></div>
     <section class="section" style="padding-top:20px;max-width:720px;margin:0 auto">
       <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:20px;padding:28px;margin-bottom:20px;display:flex;align-items:center;gap:20px">
-        <div style="width:78px;height:78px;border-radius:22px;background:linear-gradient(135deg,var(--red),#7a0410);display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:34px;box-shadow:0 10px 30px var(--red-glow)">Z</div>
-        <div><h2 style="font-family:var(--display);font-size:22px">Penonton Zerozx</h2>
+        <div style="width:78px;height:78px;border-radius:22px;background:linear-gradient(135deg,var(--red),#7a0410);display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:34px;box-shadow:0 10px 30px var(--red-glow)">W</div>
+        <div><h2 style="font-family:var(--display);font-size:22px">Penonton Wayss</h2>
           <p style="color:var(--muted);font-size:14px">Member sejak ${new Date().toLocaleDateString('id-ID',{month:'long',year:'numeric'})}</p></div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
         ${stat("Favorit", favorites.list().length)}${stat("Riwayat", watchHistory.list().length)}${stat("Pencarian", searchHistory.list().length)}
       </div>
       <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:16px;overflow:hidden">
-        ${link("Nonton Anime", "window.location.href='/anime'")}${link("Cari Film", "routeToTab('search')")}
+        ${link("Cari Film", "routeToTab('search')")}
         ${link("Buka Favorit", "routeToTab('favorites')")}${link("Buka Riwayat", "routeToTab('history')", true)}
       </div>
-      <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">ZerozxStream v2.0 — Beta · by @Zerozx</p>
+      <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">WaysStreamm v2.0 — by @Wayss</p>
     </section>`;
 }
 
@@ -483,3 +486,17 @@ window.addEventListener("scroll", () => nav.classList.toggle("scrolled", window.
 
 updateBadges();
 routeToTab(readRoute(), { push:false });
+
+/* Expose untuk inline onclick */
+window.goPlay = goPlay;
+window.toggleFav = toggleFav;
+window.switchType = switchType;
+window.switchTopRated = switchTopRated;
+window.loadSection = loadSection;
+window.routeToTab = routeToTab;
+window.submitBigSearch = submitBigSearch;
+window.clearBigSearch = clearBigSearch;
+window.removeSearchHistory = removeSearchHistory;
+window.clearSearchHistory = clearSearchHistory;
+window.clearHistory = clearHistory;
+window.closeModal = closeModal;
